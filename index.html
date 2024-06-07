@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Count Colors in Multiple PDFs</title>
+</head>
+<body>
+    <input type="file" id="fileInput" multiple>
+    <button id="downloadCsv" disabled>Download CSV</button>
+    <div id="output"></div>
+    <canvas id="pdfCanvas" style="display: none;"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
+    <script>
+        const results = [];
+
+        document.getElementById('fileInput').addEventListener('change', async function (event) {
+            const files = event.target.files;
+            const output = document.getElementById('output');
+            output.innerHTML = '';
+            results.length = 0; // Clear previous results
+
+            for (const file of files) {
+                if (file.type === 'application/pdf') {
+                    const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise;
+                    let colorPages = 0;
+                    let bwPages = 0;
+
+                    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                        const page = await pdf.getPage(pageNum);
+                        const isColor = await renderPageToCanvasAndCheckColor(page);
+
+                        if (isColor) {
+                            colorPages++;
+                        } else {
+                            bwPages++;
+                        }
+                    }
+
+                    const result = {
+                        fileName: file.name,
+                        totalPages: pdf.numPages,
+                        colorPages: colorPages,
+                        bwPages: bwPages
+                    };
+                    results.push(result);
+
+                    output.innerHTML += `<p>${file.name} - Total Pages: ${pdf.numPages}, Color Pages: ${colorPages}, B/W Pages: ${bwPages}</p>`;
+                }
+            }
+
+            document.getElementById('downloadCsv').disabled = results.length === 0;
+        });
+
+        document.getElementById('downloadCsv').addEventListener('click', function () {
+            const csvContent = "data:text/csv;charset=utf-8," 
+                + "File Name,Total Pages,Color Pages,Black and White Pages\n" 
+                + results.map(e => `${e.fileName},${e.totalPages},${e.colorPages},${e.bwPages}`).join("\n");
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "color_audit.csv");
+            document.body.appendChild(link); // Required for Firefox
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        async function renderPageToCanvasAndCheckColor(page) {
+            const viewport = page.getViewport({ scale: 1 });
+            const canvas = document.getElementById('pdfCanvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            const renderContext = {
+                canvasContext: context,
+                viewport: viewport
+            };
+
+            await page.render(renderContext).promise;
+            return checkIfPageIsColor(canvas);
+        }
+
+        function checkIfPageIsColor(canvas) {
+            const context = canvas.getContext('2d');
+            const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                const a = data[i + 3];
+
+                if (a > 0 && !(r === g && g === b)) { // Ignore transparent pixels and check for non-gray colors
+                    return true; // Page has color
+                }
+            }
+
+            return false; // Page is black and white
+        }
+    </script>
+</body>
+</html>
